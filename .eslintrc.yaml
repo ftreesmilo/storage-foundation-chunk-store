@@ -1,0 +1,19 @@
+root: true
+parser: '@babel/eslint-parser'
+extends:
+  - airbnb-base
+parserOptions:
+  ecmaFeatures:
+    jsx: true
+    experimentalObjectRestSpread: true
+env:
+  browser: true
+  es6: true
+rules:
+  no-param-reassign: off
+  import/extensions:
+    - error
+    - always
+  no-plusplus: off
+globals:
+  SharedArrayBuffer: readonly

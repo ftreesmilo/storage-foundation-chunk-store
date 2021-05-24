@@ -1,0 +1,51 @@
+{
+  "name": "storage-foundation-chunk-store",
+  "version": "1.0.0",
+  "description": "An abstract-chunk-store compatible store using storage foundation apis",
+  "main": "index.js",
+  "scripts": {
+    "test": "karma start"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ftreesmilo/storage-foundation-chunk-store.git"
+  },
+  "author": "ftreesmilo",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/ftreesmilo/storage-foundation-chunk-store/issues"
+  },
+  "homepage": "https://github.com/ftreesmilo/storage-foundation-chunk-store#readme",
+  "devDependencies": {
+    "@babel/core": "^7.14.3",
+    "@babel/eslint-parser": "^7.14.3",
+    "@babel/plugin-proposal-class-properties": "^7.13.0",
+    "@babel/plugin-proposal-optional-chaining": "^7.14.2",
+    "@babel/plugin-proposal-private-methods": "^7.13.0",
+    "@babel/preset-env": "^7.14.2",
+    "babel-loader": "^8.2.2",
+    "chai": "^4.3.4",
+    "chai-as-promised": "^7.1.1",
+    "eslint": "^7.27.0",
+    "eslint-config-airbnb-base": "^14.2.1",
+    "eslint-plugin-import": "^2.23.3",
+    "eslint-plugin-mocha": "^8.1.0",
+    "karma": "^6.3.2",
+    "karma-chai": "^0.1.0",
+    "karma-chrome-launcher": "^3.1.0",
+    "karma-mocha": "^2.0.1",
+    "karma-source-map-support": "^1.4.0",
+    "karma-sourcemap-loader": "^0.3.8",
+    "karma-webpack": "^5.0.0",
+    "mocha": "^8.4.0",
+    "puppeteer": "^9.1.1",
+    "regenerator-runtime": "^0.13.7",
+    "webpack": "^5.37.1"
+  },
+  "dependencies": {
+    "bluebird": "^3.7.2",
+    "buffer": "^6.0.3",
+    "debug": "^4.3.1",
+    "p-queue": "^7.1.0"
+  }
+}
