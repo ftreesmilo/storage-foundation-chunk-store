@@ -10,11 +10,9 @@ const { expect } = chai;
 
 const length = 1024;
 const torrent = { infoHash: '1234' };
-const name = 'test';
 const newstore = (chunkLength) => new Store(chunkLength, {
   length,
   torrent,
-  name,
   files: [
     { path: 'tmp/multi1', length: length / 2 },
     { path: 'tmp/multi2', length: length / 2 },

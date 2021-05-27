@@ -29,8 +29,11 @@ export class StorageFoundationChunkStore {
   /** @type {number} */
   chunkLength;
 
-  /** @type {Array<FileOption} */
+  /** @type {Array.<FileOption} */
   #files;
+
+  /** @type {Map.<string, number>} */
+  #fileidxs = new Map();
 
   /** @type {number} */
   #length;
@@ -47,9 +50,6 @@ export class StorageFoundationChunkStore {
   /** @type {string} */
   #infoHash;
 
-  /** @type {string} */
-  #name;
-
   /** @type {Map.<string, PQueue} */
   #queues;
 
@@ -65,7 +65,6 @@ export class StorageFoundationChunkStore {
     torrent: { infoHash } = {},
     files,
     length,
-    name,
   } = {}) {
     if (!chunkLength) throw new Error('First argument must be a chunk length.');
     this.chunkLength = chunkLength;
@@ -83,6 +82,7 @@ export class StorageFoundationChunkStore {
           file.offset = prevFile.offset + prevFile.length;
         }
       }
+      this.#fileidxs.set(file.path, i);
     });
     this.#files = files;
 
@@ -99,9 +99,6 @@ export class StorageFoundationChunkStore {
 
     if (!infoHash) throw new Error('Missing `infoHash` in torrent option.');
     this.#infoHash = infoHash;
-
-    if (!name) throw new Error('Missing name option');
-    this.#name = name;
 
     this.#queues = new Map(files.map(({ path }) => [path, new PQueue({ concurrency: 1 })]));
 
@@ -136,6 +133,17 @@ export class StorageFoundationChunkStore {
         });
       }
     });
+  }
+
+  /**
+   * @param {string} path
+   * @returns {string} the storage filename for the file
+   */
+  #getStoreFileName(path) {
+    if (!this.#fileidxs) {
+      throw new Error(`Unknown file path '${path}'`);
+    }
+    return `${this.#infoHash}_${this.#fileidxs.get(path)}`;
   }
 
   async close(cb = () => { }) {
@@ -190,9 +198,7 @@ export class StorageFoundationChunkStore {
           const shared = new SharedArrayBuffer(to - from);
           const view = new Uint8Array(shared);
           view.set(buf.slice(from, to));
-
-          const filename = path.toLocaleLowerCase().split('/').pop().replaceAll(/[^a-z0-9_]/g, '_');
-          const file = await window.storageFoundation.open(`${this.#infoHash}_${filename}`);
+          const file = await window.storageFoundation.open(this.#getStoreFileName(path));
           try {
             await file.write(view, offset);
           } finally {
@@ -258,8 +264,7 @@ export class StorageFoundationChunkStore {
         return this.#queues.get(path).add(async () => {
           const shared = new SharedArrayBuffer(to - from);
           const view = new Uint8Array(shared);
-          const filename = path.toLocaleLowerCase().split('/').pop().replaceAll(/[^a-z0-9_]/g, '_');
-          const file = await window.storageFoundation.open(`${this.#infoHash}_${filename}`);
+          const file = await window.storageFoundation.open(this.#getStoreFileName(path));
           try {
             const read = await file.read(view, offset);
             return view.slice(0, read);
