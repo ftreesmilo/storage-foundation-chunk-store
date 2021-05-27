@@ -1,6 +1,6 @@
 {
   "name": "storage-foundation-chunk-store",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "An abstract-chunk-store compatible store using storage foundation apis",
   "main": "index.js",
   "scripts": {
