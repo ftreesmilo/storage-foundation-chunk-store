@@ -71,19 +71,20 @@ export class StorageFoundationChunkStore {
 
     if (!files || !files.length) throw new Error('`opts` must contain an array of files.');
     if (!Array.isArray(files)) throw new Error('`files` option must be an array.');
-    files.forEach((file, i) => {
-      if (file.path == null) throw new Error('File is missing `path` property.');
-      if (file.length == null) throw new Error('File is missing `length` property.');
-      if (file.offset == null) {
-        if (i === 0) {
-          file.offset = 0;
-        } else {
-          const prevFile = files[i - 1];
-          file.offset = prevFile.offset + prevFile.length;
+    files.sort((a, b) => a.path.localeCompare(b.path))
+      .forEach((file, i) => {
+        if (file.path == null) throw new Error('File is missing `path` property.');
+        if (file.length == null) throw new Error('File is missing `length` property.');
+        if (file.offset == null) {
+          if (i === 0) {
+            file.offset = 0;
+          } else {
+            const prevFile = files[i - 1];
+            file.offset = prevFile.offset + prevFile.length;
+          }
         }
-      }
-      this.#fileidxs.set(file.path, i);
-    });
+        this.#fileidxs.set(file.path, i);
+      });
     this.#files = files;
 
     this.#length = files.reduce((sum, { length: len }) => sum + len, 0);
