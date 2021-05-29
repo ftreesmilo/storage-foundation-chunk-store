@@ -155,7 +155,7 @@ export class StorageFoundationChunkStore {
       if (fn.length) {
         const file = await open(filename);
         try {
-          return io.add(() => fn(file));
+          return await io.add(() => fn(file));
         } finally {
           await file.close();
         }
