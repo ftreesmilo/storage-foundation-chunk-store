@@ -15,5 +15,3 @@ rules:
     - error
     - always
   no-plusplus: off
-globals:
-  SharedArrayBuffer: readonly

@@ -2,11 +2,24 @@ import { Buffer } from 'buffer';
 import Promise from 'bluebird';
 import debug from 'debug';
 import PQueue from 'p-queue'; // eslint-disable-line import/no-unresolved
+import NativeIOFileManager from './NativeIOFileManager.js';
+
+const {
+  open,
+  delete: deleteFile,
+  getAll,
+  requestCapacity,
+  releaseCapacity,
+} = NativeIOFileManager;
 
 const error = debug('sfcs:error');
 error.log = console.log.bind(console); // eslint-disable-line no-console
 
-let total = 0;
+const concurrency = 5; // total concurrent io ops across all stores.
+const io = new PQueue({ concurrency });
+const atomic = new PQueue({ concurrency: 1 });
+
+let size = 0;
 
 /**
  * @typedef {Object} FileOption
@@ -24,7 +37,26 @@ let total = 0;
  */
 
 export class StorageFoundationChunkStore {
+  /** @type {number} */
+  static get size() { return size; }
+
+  /**
+   * A promise for when the store has been allocated and is ready (use this.ready)
+   * @type {Promise<void>}
+   */
+  #ready;
+
   #closed = false;
+
+  /**
+   * A promise for when a store is ready and open.
+   * @type {Promise<void>}
+   */
+  get ready() {
+    return this.#ready.then(() => {
+      if (this.#closed) throw new Error('Store is closed.');
+    });
+  }
 
   /** @type {number} */
   chunkLength;
@@ -36,7 +68,7 @@ export class StorageFoundationChunkStore {
   #fileidxs = new Map();
 
   /** @type {number} */
-  #length;
+  length;
 
   /** @type {number} */
   #lastChunkLength;
@@ -50,7 +82,7 @@ export class StorageFoundationChunkStore {
   /** @type {string} */
   #infoHash;
 
-  /** @type {Map.<string, PQueue} */
+  /** @type {Map.<string, PQueue>} */
   #queues;
 
   /**
@@ -87,23 +119,50 @@ export class StorageFoundationChunkStore {
       });
     this.#files = files;
 
-    this.#length = files.reduce((sum, { length: len }) => sum + len, 0);
-    total += this.#length;
+    this.length = files.reduce((sum, { length: len }) => sum + len, 0);
 
     // sanity check
-    if (!Number.isNaN(length) && length !== this.#length) {
-      throw new Error(`total 'files' length (${this.#length}) is not equal to explicit 'length' option (${length}).`);
+    if (!Number.isNaN(length) && length !== this.length) {
+      throw new Error(`total 'files' length (${this.length}) is not equal to explicit 'length' option (${length}).`);
     }
 
-    this.#lastChunkLength = (this.#length % this.chunkLength) || this.chunkLength;
-    this.#lastChunkIndex = Math.ceil(this.#length / this.chunkLength) - 1;
+    this.#lastChunkLength = (this.length % this.chunkLength) || this.chunkLength;
+    this.#lastChunkIndex = Math.ceil(this.length / this.chunkLength) - 1;
 
     if (!infoHash) throw new Error('Missing `infoHash` in torrent option.');
     this.#infoHash = infoHash;
 
-    this.#queues = new Map(files.map(({ path }) => [path, new PQueue({ concurrency: 1 })]));
+    this.#queues = new Map(
+      files.map(({ path }) => {
+        const filename = this.#getStoreFileName(path);
+        return [filename, new PQueue({ concurrency: 1 })];
+      }),
+    );
 
     this.#buildChunkMap();
+    this.#alloc();
+  }
+
+  /**
+   * Spread out file writes wide before pushing them through io queue
+   * @template T
+   * @param {string} filename
+   * @param {() => Promise.<T>} fn will pass the referenced file to fn if fn declares a param
+   * @returns {Promise.<T>}
+   */
+  async #queue(filename, fn) {
+    return this.#queues.get(filename).add(async () => {
+      if (fn.length) {
+        const file = await open(filename);
+        try {
+          return io.add(() => fn(file));
+        } finally {
+          await file.close();
+        }
+      } else {
+        return io.add(() => fn());
+      }
+    });
   }
 
   #buildChunkMap() {
@@ -148,23 +207,50 @@ export class StorageFoundationChunkStore {
   }
 
   async close(cb = () => { }) {
-    this.#closed = true;
-    cb();
+    try {
+      await this.ready;
+      const queues = this.#queues.values();
+      await Promise.map(queues, async (q) => q.onIdle());
+      this.#closed = true;
+      return;
+    } catch (e) {
+      // ignore
+    } finally {
+      cb();
+    }
   }
 
   async destroy(cb = () => { }) {
+    await this.close();
+    let err;
     try {
-      const filenames = (await window.storageFoundation.getAll())
-        .filter((filename) => filename.startsWith(this.#infoHash));
-      await Promise.all(
-        filenames.map((filename) => window.storageFoundation.delete(filename)),
-      );
-      await window.storageFoundation.releaseCapacity(this.#length);
+      await Promise.filter(getAll(), (n) => this.#queues.has(n))
+        .map((n) => io.add(() => deleteFile(n)));
+      await this.#free();
     } catch (e) {
-      cb(e);
+      err = e;
       throw e;
+    } finally {
+      cb(err);
     }
-    cb();
+  }
+
+  #alloc() {
+    this.#ready = atomic.add(async () => {
+      size += this.length;
+      await requestCapacity(this.length);
+      await Promise.map(this.#files, ({ path, length }) => {
+        const name = this.#getStoreFileName(path);
+        return this.#queue(name, (file) => file.setLength(length));
+      });
+    });
+  }
+
+  async #free() {
+    return atomic.add(async () => {
+      size -= this.length;
+      await releaseCapacity(this.length);
+    });
   }
 
   /**
@@ -175,8 +261,7 @@ export class StorageFoundationChunkStore {
    */
   async put(index, buf, cb = () => { }) {
     try {
-      if (this.#closed) throw new Error('Storage is closed.');
-      await window.storageFoundation.requestCapacity(total);
+      await this.ready;
 
       const isLastChunk = (index === this.#lastChunkIndex);
       if (isLastChunk && buf.length !== this.#lastChunkLength) {
@@ -195,18 +280,18 @@ export class StorageFoundationChunkStore {
           offset,
           file: { path },
         } = target;
-        return this.#queues.get(path).add(async () => {
-          const shared = new SharedArrayBuffer(to - from);
-          const view = new Uint8Array(shared);
-          view.set(buf.slice(from, to));
-          const file = await window.storageFoundation.open(this.#getStoreFileName(path));
-          try {
-            await file.write(view, offset);
-          } finally {
-            await file.close();
+        const filename = this.#getStoreFileName(path);
+        return this.#queue(filename, async (file) => {
+          // try not to copy memory unless we need to
+          if (targets.length > 1) {
+            const buff = Buffer.alloc(to - from);
+            buf.copy(buff, 0, from, to);
+            await file.write(buff, offset);
+          } else {
+            await file.write(buf.slice(from, to), offset);
           }
         });
-      }, { concurrency: 5 });
+      });
 
       cb();
     } catch (e) {
@@ -225,7 +310,7 @@ export class StorageFoundationChunkStore {
   async get(index, options = {}, cb = () => { }) {
     if (typeof opts === 'function') return this.get(index, undefined, options);
     try {
-      if (this.#closed) throw new Error('Storage is closed.');
+      await this.ready;
 
       const chunkLength = (index === this.#lastChunkIndex)
         ? this.#lastChunkLength
@@ -239,7 +324,8 @@ export class StorageFoundationChunkStore {
       if (!this.#chunkMap.has(index)) throw new Error('No files matching the request range.');
 
       const targets = this.#chunkMap.get(index)
-        .filter((target) => (target.to > rangeFrom && target.from < rangeTo));
+        .filter((target) => (target.to > rangeFrom && target.from < rangeTo))
+        .sort((a, b) => a.from - b.from);
       if (targets.length === 0) {
         throw new Error('No files matching the requested range.');
       }
@@ -262,18 +348,13 @@ export class StorageFoundationChunkStore {
           }
         }
 
-        return this.#queues.get(path).add(async () => {
-          const shared = new SharedArrayBuffer(to - from);
-          const view = new Uint8Array(shared);
-          const file = await window.storageFoundation.open(this.#getStoreFileName(path));
-          try {
-            const read = await file.read(view, offset);
-            return view.slice(0, read);
-          } finally {
-            await file.close();
-          }
+        const filename = this.#getStoreFileName(path);
+        return this.#queue(filename, async (file) => {
+          /** @type {{buffer: Uint8Array}} */
+          const { buffer } = await file.read(new Uint8Array(to - from), offset);
+          return buffer;
         });
-      }, { concurrency: 5 });
+      });
 
       const result = Buffer.concat(parts);
       cb(null, result);

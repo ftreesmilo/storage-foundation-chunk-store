@@ -1,19 +1,16 @@
 const { ProvidePlugin } = require('webpack');
 
-// eslint-disable-next-line import/no-extraneous-dependencies
-process.env.CHROME_BIN = require('puppeteer').executablePath();
-
 module.exports = (config) => {
   config.set({
     frameworks: ['webpack', 'source-map-support', 'mocha', 'chai'],
     files: [
       './node_modules/regenerator-runtime/runtime.js',
-      { pattern: 'test/**/*.js', type: 'module' },
+      { pattern: 'test/**/*tests.js', type: 'module' },
     ],
     preprocessors: {
-      'test/**/*.js': ['webpack', 'sourcemap'],
+      'test/**/*tests.js': ['webpack', 'sourcemap'],
     },
-    reporters: ['progress'],
+    reporters: ['mocha'],
     colors: true,
     logLevel: config.LOG_INFO,
     browsers: ['ChromeHeadlessWithStorage'],
@@ -21,18 +18,6 @@ module.exports = (config) => {
     singleRun: true,
     port: 80,
     concurrency: 1,
-    customHeaders: [
-      {
-        match: '.*',
-        name: 'Cross-Origin-Embedder-Policy',
-        value: 'require-corp',
-      },
-      {
-        match: '.*',
-        name: 'Cross-Origin-Opener-Policy',
-        value: 'same-origin',
-      },
-    ],
     customLaunchers: {
       ChromeHeadlessWithStorage: {
         base: 'ChromeHeadless',
