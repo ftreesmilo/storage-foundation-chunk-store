@@ -2,6 +2,8 @@ import { Buffer } from 'buffer';
 import Promise from 'bluebird';
 import debug from 'debug';
 import PQueue from 'p-queue'; // eslint-disable-line import/no-unresolved
+import './types.js';
+import ChunkInfo from './ChunkInfo.js';
 import NativeIOFileManager from './NativeIOFileManager.js';
 
 const {
@@ -21,27 +23,13 @@ const atomic = new PQueue({ concurrency: 1 });
 
 let size = 0;
 
-/**
- * @typedef {Object} FileOption
- * @property {string} path
- * @property {number} length
- * @property {number} offset
- */
-
-/**
- * @typedef {Object} ChunkInfo
- * @property {number} from start of the file in the chunk
- * @property {number} to end of the file in the chunk
- * @property {number} offset offset of the file in the chunk (`from` is not start of `file` if > 0)
- * @property {FileOption} file the file in the chunk
- */
-
 export class StorageFoundationChunkStore {
   /** @type {number} */
   static get size() { return size; }
 
   /**
-   * A promise for when the store has been allocated and is ready (use this.ready)
+   * A promise for when the store has been allocated and is ready.
+   * Use this.ready unless setting this value
    * @type {Promise<void>}
    */
   #ready;
@@ -61,9 +49,6 @@ export class StorageFoundationChunkStore {
   /** @type {number} */
   chunkLength;
 
-  /** @type {Array.<FileOption} */
-  #files;
-
   /** @type {Map.<string, number>} */
   #fileidxs = new Map();
 
@@ -76,8 +61,7 @@ export class StorageFoundationChunkStore {
   /** @type {number} */
   #lastChunkIndex;
 
-  /** @type {Map.<number, Array.<ChunkInfo>>} */
-  #chunkMap = new Map();
+  #chunkMap;
 
   /** @type {string} */
   #infoHash;
@@ -98,11 +82,14 @@ export class StorageFoundationChunkStore {
     files,
     length,
   } = {}) {
-    if (!chunkLength) throw new Error('First argument must be a chunk length.');
     this.chunkLength = chunkLength;
+    this.#infoHash = infoHash;
 
+    if (!chunkLength) throw new Error('First argument must be a chunk length.');
+    if (!infoHash) throw new Error('Missing `infoHash` in torrent option.');
     if (!files || !files.length) throw new Error('`opts` must contain an array of files.');
     if (!Array.isArray(files)) throw new Error('`files` option must be an array.');
+
     files.sort((a, b) => a.path.localeCompare(b.path))
       .forEach((file, i) => {
         if (file.path == null) throw new Error('File is missing `path` property.');
@@ -117,8 +104,6 @@ export class StorageFoundationChunkStore {
         }
         this.#fileidxs.set(file.path, i);
       });
-    this.#files = files;
-
     this.length = files.reduce((sum, { length: len }) => sum + len, 0);
 
     // sanity check
@@ -129,26 +114,20 @@ export class StorageFoundationChunkStore {
     this.#lastChunkLength = (this.length % this.chunkLength) || this.chunkLength;
     this.#lastChunkIndex = Math.ceil(this.length / this.chunkLength) - 1;
 
-    if (!infoHash) throw new Error('Missing `infoHash` in torrent option.');
-    this.#infoHash = infoHash;
+    this.#queues = new Map(files.map(({ path }) => [
+      this.#getStoreFileName(path),
+      new PQueue({ concurrency: 1 }),
+    ]));
 
-    this.#queues = new Map(
-      files.map(({ path }) => {
-        const filename = this.#getStoreFileName(path);
-        return [filename, new PQueue({ concurrency: 1 })];
-      }),
-    );
-
-    this.#buildChunkMap();
-    this.#alloc();
+    this.#chunkMap = ChunkInfo.buildChunkMap(chunkLength, files);
+    this.#alloc(files);
   }
 
   /**
    * Spread out file writes wide before pushing them through io queue
-   * @template T
    * @param {string} filename
-   * @param {() => Promise.<T>} fn will pass the referenced file to fn if fn declares a param
-   * @returns {Promise.<T>}
+   * @param {(file: NativeIOFile) => Promise.<void>} fn
+   * @returns {Promise.<void>}
    */
   async #queue(filename, fn) {
     return this.#queues.get(filename).add(async () => {
@@ -161,36 +140,6 @@ export class StorageFoundationChunkStore {
         }
       } else {
         return io.add(() => fn());
-      }
-    });
-  }
-
-  #buildChunkMap() {
-    this.#files.forEach((file) => {
-      const fileStart = file.offset;
-      const fileEnd = fileStart + file.length;
-
-      const firstChunk = Math.floor(fileStart / this.chunkLength);
-      const lastChunk = Math.floor((fileEnd - 1) / this.chunkLength);
-
-      for (let idx = firstChunk; idx <= lastChunk; ++idx) {
-        const chunkStart = idx * this.chunkLength;
-        const chunkEnd = chunkStart + this.chunkLength;
-
-        const from = (fileStart < chunkStart) ? 0 : fileStart - chunkStart;
-        const to = (fileEnd > chunkEnd) ? this.chunkLength : fileEnd - chunkStart;
-        const offset = (fileStart > chunkStart) ? 0 : chunkStart - fileStart;
-
-        let info = this.#chunkMap.get(idx);
-        if (!info) {
-          this.#chunkMap.set(idx, info = []);
-        }
-        info.push({
-          from,
-          to,
-          offset,
-          file,
-        });
       }
     });
   }
@@ -208,13 +157,12 @@ export class StorageFoundationChunkStore {
 
   async close(cb = () => { }) {
     try {
-      await this.ready;
+      try {
+        await this.ready;
+      } catch (e) { /* ignore */ }
       const queues = this.#queues.values();
       await Promise.map(queues, async (q) => q.onIdle());
       this.#closed = true;
-      return;
-    } catch (e) {
-      // ignore
     } finally {
       cb();
     }
@@ -235,11 +183,12 @@ export class StorageFoundationChunkStore {
     }
   }
 
-  #alloc() {
+  /** @param {Array<FileOption>} files */
+  #alloc(files) {
     this.#ready = atomic.add(async () => {
       size += this.length;
       await requestCapacity(this.length);
-      await Promise.map(this.#files, ({ path, length }) => {
+      await Promise.map(files, ({ path, length }) => {
         const name = this.#getStoreFileName(path);
         return this.#queue(name, (file) => file.setLength(length));
       });
@@ -260,7 +209,9 @@ export class StorageFoundationChunkStore {
    * @returns {Promise<undefined>}
    */
   async put(index, buf, cb = () => { }) {
+    let err;
     try {
+      if (!this.#chunkMap.has(index)) throw new Error('Invalid chunk.');
       await this.ready;
 
       const isLastChunk = (index === this.#lastChunkIndex);
@@ -272,7 +223,6 @@ export class StorageFoundationChunkStore {
       }
 
       const targets = this.#chunkMap.get(index);
-      if (!targets) throw new Error('No files matching the request range.');
       await Promise.map(targets, async (target) => {
         const {
           from,
@@ -292,12 +242,11 @@ export class StorageFoundationChunkStore {
           }
         });
       });
-
-      cb();
     } catch (e) {
-      error(e);
-      cb(e);
+      err = e;
       throw e;
+    } finally {
+      cb(err);
     }
   }
 
@@ -309,60 +258,58 @@ export class StorageFoundationChunkStore {
    */
   async get(index, options = {}, cb = () => { }) {
     if (typeof opts === 'function') return this.get(index, undefined, options);
+    if (options === null) return this.get(index, undefined, cb);
+    let err;
+    let result;
     try {
+      if (!this.#chunkMap.has(index)) throw new Error('Invalid chunk.');
       await this.ready;
 
       const chunkLength = (index === this.#lastChunkIndex)
         ? this.#lastChunkLength
         : this.chunkLength;
-      const rangeFrom = options?.offset || 0;
-      const rangeTo = options?.length ? rangeFrom + options?.length : chunkLength;
+      const rangeFrom = options.offset || 0;
+      const rangeTo = options.length ? rangeFrom + options.length : chunkLength;
+
       if (rangeFrom < 0 || rangeFrom < 0 || rangeTo > chunkLength) {
         throw new Error('Invalid offset and/or length.');
       }
-
-      if (!this.#chunkMap.has(index)) throw new Error('No files matching the request range.');
+      if (rangeFrom === rangeTo) {
+        result = Buffer.alloc(0);
+        return result;
+      }
 
       const targets = this.#chunkMap.get(index)
-        .filter((target) => (target.to > rangeFrom && target.from < rangeTo))
+        .filter(({ to, from }) => (to > rangeFrom && from < rangeTo))
         .sort((a, b) => a.from - b.from);
       if (targets.length === 0) {
         throw new Error('No files matching the requested range.');
-      }
-
-      if (rangeFrom === rangeTo) {
-        const buf = Buffer.alloc(0);
-        cb(null, buf);
-        return buf;
       }
 
       const parts = await Promise.map(targets, async (target) => {
         let { from, to, offset } = target;
         const { file: { path } } = target;
 
-        if (options) {
-          if (to > rangeTo) to = rangeTo;
-          if (from < rangeFrom) {
-            offset += (rangeFrom - from);
-            from = rangeFrom;
-          }
+        to = Math.min(to, rangeTo);
+        if (from < rangeFrom) {
+          offset += (rangeFrom - from);
+          from = rangeFrom;
         }
 
         const filename = this.#getStoreFileName(path);
         return this.#queue(filename, async (file) => {
-          /** @type {{buffer: Uint8Array}} */
           const { buffer } = await file.read(new Uint8Array(to - from), offset);
           return buffer;
         });
       });
 
-      const result = Buffer.concat(parts);
-      cb(null, result);
+      result = Buffer.concat(parts);
       return result;
     } catch (e) {
-      error(e);
-      cb(e);
+      err = e;
       throw e;
+    } finally {
+      cb(err, result);
     }
   }
 }

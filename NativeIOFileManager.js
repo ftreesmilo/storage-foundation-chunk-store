@@ -1,26 +1,6 @@
+import './types.js';
+
 const storage = window.storageFoundation;
-
-/**
- * @typedef NativeIOReadResult
- * @property {Buffer} buffer
- * @property {number} readBytes
- */
-
-/**
- * @typedef NativeIOWriteResult
- * @property {Buffer} buffer
- * @property {number} writtenBytes
- */
-
-/**
- * @typedef NativeIOFile
- * @property {() => Promise.<void>} close
- * @property {() => Promise.<void>} flush
- * @property {() => Promise.<number>} getLength
- * @property {(length: number) => Promise.<void>} setLength
- * @property {(buffer: Buffer, fileOffset: number) => Promise.<NativeIOReadResult>} read
- * @property {(buffer: Buffer, fileOffset: number) => Promise.<NativeIOWriteResult>} write
- */
 
 export default class NativeIOFileManager {
   /**
