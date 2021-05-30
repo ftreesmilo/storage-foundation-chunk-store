@@ -3,7 +3,7 @@ import chai from 'chai';
 import asPromised from 'chai-as-promised';
 import { newstore, destroyStores } from './util.js';
 import NativeIOFileManager from '../NativeIOFileManager.js';
-import { StorageFoundationChunkStore } from '../index.js';
+import StorageFoundationChunkStore from '../StorageFoundationChunkStore.js';
 
 const {
   getAll,

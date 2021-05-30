@@ -1,3 +1,4 @@
+import Promise, { Disposer } from 'bluebird'; // eslint-disable-line no-unused-vars
 import './types.js';
 
 const storage = window.storageFoundation;
@@ -7,10 +8,11 @@ export default class NativeIOFileManager {
    * Opens the file with the given name if it exists and otherwise creates a
    * new file.
    * @param {string} name
-   * @returns {Promise.<NativeIOFile>}
+   * @returns {Disposer.<NativeIOFile>}
    */
   static async open(name) {
-    return storage.open(name);
+    return Promise.resolve(storage.open(name))
+      .disposer((file) => file.close());
   }
 
   /**

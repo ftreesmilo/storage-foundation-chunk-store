@@ -4,7 +4,7 @@ import asPromised from 'chai-as-promised';
 import { newstore, destroyStores } from './util.js';
 
 // eslint-disable-next-line no-unused-vars
-import { StorageFoundationChunkStore } from '../index.js';
+import StorageFoundationChunkStore from '../StorageFoundationChunkStore.js';
 
 chai.use(asPromised);
 const { expect } = chai;

@@ -4,7 +4,7 @@ import Promise from 'bluebird';
 import chai from 'chai';
 import asPromised from 'chai-as-promised';
 import { newstore, destroyStores } from './util.js';
-import { StorageFoundationChunkStore } from '../index.js';
+import StorageFoundationChunkStore from '../StorageFoundationChunkStore.js';
 
 chai.use(asPromised);
 const { expect } = chai;

@@ -1,5 +1,5 @@
 import Promise from 'bluebird';
-import { StorageFoundationChunkStore } from '../index.js';
+import StorageFoundationChunkStore from '../StorageFoundationChunkStore.js';
 
 /**
  * @param {Set.<Store>} stores

@@ -23,7 +23,7 @@ const atomic = new PQueue({ concurrency: 1 });
 
 let size = 0;
 
-export class StorageFoundationChunkStore {
+export default class StorageFoundationChunkStore {
   /** @type {number} */
   static get size() { return size; }
 
@@ -90,8 +90,9 @@ export class StorageFoundationChunkStore {
     if (!files || !files.length) throw new Error('`opts` must contain an array of files.');
     if (!Array.isArray(files)) throw new Error('`files` option must be an array.');
 
-    files.sort((a, b) => a.path.localeCompare(b.path))
-      .forEach((file, i) => {
+    this.length = [...files].sort((a, b) => a.path.localeCompare(b.path))
+      .reduce((sum, file, i) => {
+        this.#fileidxs.set(file.path, i);
         if (file.path == null) throw new Error('File is missing `path` property.');
         if (file.length == null) throw new Error('File is missing `length` property.');
         if (file.offset == null) {
@@ -102,9 +103,8 @@ export class StorageFoundationChunkStore {
             file.offset = prevFile.offset + prevFile.length;
           }
         }
-        this.#fileidxs.set(file.path, i);
-      });
-    this.length = files.reduce((sum, { length: len }) => sum + len, 0);
+        return sum + file.length;
+      }, 0);
 
     // sanity check
     if (!Number.isNaN(length) && length !== this.length) {
@@ -120,28 +120,18 @@ export class StorageFoundationChunkStore {
     ]));
 
     this.#chunkMap = ChunkInfo.buildChunkMap(chunkLength, files);
-    this.#alloc(files);
+    this.#ready = this.#alloc(files);
   }
 
   /**
    * Spread out file writes wide before pushing them through io queue
-   * @param {string} filename
+   * @param {string} name
    * @param {(file: NativeIOFile) => Promise.<void>} fn
    * @returns {Promise.<void>}
    */
-  async #queue(filename, fn) {
-    return this.#queues.get(filename).add(async () => {
-      if (fn.length) {
-        const file = await open(filename);
-        try {
-          return await io.add(() => fn(file));
-        } finally {
-          await file.close();
-        }
-      } else {
-        return io.add(() => fn());
-      }
-    });
+  async #queue(name, fn) {
+    return this.#queues.get(name)
+      .add(() => Promise.using(open(name), fn));
   }
 
   /**
@@ -149,9 +139,6 @@ export class StorageFoundationChunkStore {
    * @returns {string} the storage filename for the file
    */
   #getStoreFileName(path) {
-    if (!this.#fileidxs) {
-      throw new Error(`Unknown file path '${path}'`);
-    }
     return `${this.#infoHash}_${this.#fileidxs.get(path)}`;
   }
 
@@ -184,8 +171,8 @@ export class StorageFoundationChunkStore {
   }
 
   /** @param {Array<FileOption>} files */
-  #alloc(files) {
-    this.#ready = atomic.add(async () => {
+  async #alloc(files) {
+    return atomic.add(async () => {
       size += this.length;
       await requestCapacity(this.length);
       await Promise.map(files, ({ path, length }) => {
@@ -222,26 +209,16 @@ export class StorageFoundationChunkStore {
         throw new Error(`Chunk length must be ${this.chunkLength}`);
       }
 
-      const targets = this.#chunkMap.get(index);
-      await Promise.map(targets, async (target) => {
-        const {
-          from,
-          to,
-          offset,
-          file: { path },
-        } = target;
-        const filename = this.#getStoreFileName(path);
-        return this.#queue(filename, async (file) => {
-          // try not to copy memory unless we need to
-          if (targets.length > 1) {
-            const buff = Buffer.alloc(to - from);
-            buf.copy(buff, 0, from, to);
-            await file.write(buff, offset);
-          } else {
-            await file.write(buf.slice(from, to), offset);
-          }
+      await Promise.resolve(this.#chunkMap.get(index))
+        .map(async (target, idx, len) => {
+          const { from, to, offset } = target;
+          const filename = this.#getStoreFileName(target.file.path);
+          return this.#queue(filename, async (file) => {
+            const data = buf.slice(from, to);
+            // try not to copy memory unless we need to
+            await file.write(len === 1 ? data : Buffer.alloc(to - from, data), offset);
+          });
         });
-      });
     } catch (e) {
       err = e;
       throw e;
@@ -279,29 +256,21 @@ export class StorageFoundationChunkStore {
         return result;
       }
 
-      const targets = this.#chunkMap.get(index)
+      const parts = await Promise.resolve(this.#chunkMap.get(index))
         .filter(({ to, from }) => (to > rangeFrom && from < rangeTo))
-        .sort((a, b) => a.from - b.from);
-      if (targets.length === 0) {
-        throw new Error('No files matching the requested range.');
-      }
+        .map(async (target) => {
+          let { from, to, offset } = target;
 
-      const parts = await Promise.map(targets, async (target) => {
-        let { from, to, offset } = target;
-        const { file: { path } } = target;
+          to = Math.min(to, rangeTo);
+          if (from < rangeFrom) {
+            offset += (rangeFrom - from);
+            from = rangeFrom;
+          }
 
-        to = Math.min(to, rangeTo);
-        if (from < rangeFrom) {
-          offset += (rangeFrom - from);
-          from = rangeFrom;
-        }
-
-        const filename = this.#getStoreFileName(path);
-        return this.#queue(filename, async (file) => {
-          const { buffer } = await file.read(new Uint8Array(to - from), offset);
-          return buffer;
-        });
-      });
+          const filename = this.#getStoreFileName(target.file.path);
+          return this.#queue(filename, (file) => file.read(new Uint8Array(to - from), offset));
+        })
+        .map(({ buffer }) => buffer);
 
       result = Buffer.concat(parts);
       return result;
@@ -313,5 +282,3 @@ export class StorageFoundationChunkStore {
     }
   }
 }
-
-export default StorageFoundationChunkStore;
