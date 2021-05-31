@@ -4,7 +4,8 @@
   "description": "An abstract-chunk-store compatible store using storage foundation apis",
   "main": "StorageFoundationChunkStore.js",
   "scripts": {
-    "test": "karma start"
+    "test": "karma start",
+    "lint": "eslint ."
   },
   "repository": {
     "type": "git",
