@@ -38,7 +38,7 @@ export default class AbstractStorageFoundationFileStore {
    * @type {Promise<void>}
    */
   get ready() {
-    return this.#ready.then(() => { if (this.#closed) throw new Error(''); });
+    return this.#ready.then(() => { if (this.#closed) throw new Error('Store is closed.'); });
   }
 
   /** @type {Map.<string, PQueue>} */
@@ -83,17 +83,18 @@ export default class AbstractStorageFoundationFileStore {
 
   /** @param {Array<FileOption>} files */
   async #alloc(files) {
-    return atomic.add(async () => {
-      try {
+    try {
+      return await atomic.add(async () => {
         size += this.length;
         await requestCapacity(this.length);
         await Promise.resolve(files)
           .map(({ path, length }) => this.queue(path, (file) => file.setLength(length)));
-      } catch (err) {
-        this.#closed = true;
-        throw err;
-      }
-    });
+      });
+    } catch (err) {
+      this.#closed = true;
+      await this.destroy();
+      throw err;
+    }
   }
 
   async #free() {
@@ -105,6 +106,7 @@ export default class AbstractStorageFoundationFileStore {
 
   async close(cb = () => { }) {
     try {
+      if (this.#closed) return;
       try {
         await this.ready;
       } catch (e) { /* ignore */ }
