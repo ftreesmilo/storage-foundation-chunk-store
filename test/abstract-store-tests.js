@@ -16,8 +16,8 @@ const makeBuffer = (num) => {
 };
 
 describe('abstract-chunks-store tests', function () {
-  /** @type {Set.<StorageFoundationChunkStore>} */
-  const stores = new Set();
+  /** @type {Map.<string, StorageFoundationChunkStore>} */
+  const stores = new Map();
 
   afterEach(async function () {
     await destroyStores(stores);

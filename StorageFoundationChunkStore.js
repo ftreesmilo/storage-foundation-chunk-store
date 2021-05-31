@@ -5,7 +5,15 @@ import './types.js';
 import ChunkInfo from './ChunkInfo.js';
 import AbstractStorageFoundationFileStore from './AbstractStorageFoundationFileStore.js';
 
+/** @type {Map.<string, StorageFoundationChunkStore>} */
+const stores = new Map();
+
 export default class StorageFoundationChunkStore extends AbstractStorageFoundationFileStore {
+  /** @param {string} infoHash */
+  static getStore(infoHash) { return stores.get(infoHash); }
+
+  #infoHash;
+
   /** @type {number} */
   chunkLength;
 
@@ -34,6 +42,7 @@ export default class StorageFoundationChunkStore extends AbstractStorageFoundati
     if (!infoHash) throw new Error('Missing `infoHash` in torrent option.');
     super(files, length, (path) => `${infoHash}_${this.#fileidxs.get(path)}`);
 
+    this.#infoHash = infoHash;
     this.chunkLength = chunkLength;
     this.#lastChunkLength = (this.length % chunkLength) || chunkLength;
     this.#lastChunkIndex = Math.ceil(this.length / chunkLength) - 1;
@@ -42,6 +51,13 @@ export default class StorageFoundationChunkStore extends AbstractStorageFoundati
       .sort((a, b) => a.path.localeCompare(b.path))
       .forEach(({ path }, i) => this.#fileidxs.set(path, i));
     this.#chunkMap = ChunkInfo.buildChunkMap(chunkLength, files);
+    stores.set(infoHash, this);
+    this.ready.catch(() => stores.delete(infoHash));
+  }
+
+  async destroy() {
+    stores.delete(this.#infoHash);
+    return super.destroy();
   }
 
   /**

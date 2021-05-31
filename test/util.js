@@ -2,7 +2,7 @@ import Promise from 'bluebird';
 import StorageFoundationChunkStore from '../StorageFoundationChunkStore.js';
 
 /**
- * @param {Set.<Store>} stores
+ * @param {Map.<string, StorageFoundationChunkStore>} stores
  * @param {number} chunkLength
  * @param {number} length
  * @param {{infoHash: string}} torrent
@@ -23,19 +23,19 @@ export const newstore = async (
       { path: 'a3', offset: 3, length: length - 3 },
     ],
   });
-  stores.add(store);
+  stores.set(torrent.infoHash, store);
   await store.ready;
   return store;
 };
 
 /**
- * @param {Set.<StorageFoundationChunkStore>} stores
- * @param {() => Promise)}
+ * @param {Map.<string, StorageFoundationChunkStore>} stores
+ * @param {(infoHash: string, StorageFoundationChunkStore) => Promise)}
  */
 export const destroyStores = async (stores, cb = async () => {}) => {
-  await Promise.map(stores, async (store) => {
+  await Promise.map(stores, async ([infoHash, store]) => {
     await store.destroy();
-    await cb(store);
+    await cb(infoHash, store);
   });
   stores.clear();
 };

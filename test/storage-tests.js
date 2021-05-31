@@ -16,8 +16,8 @@ chai.use(asPromised);
 const { expect } = chai;
 
 describe('storage', function () {
-  /** @type {Set.<StorageFoundationChunkStore>} */
-  const stores = new Set();
+  /** @type {Map.<sting, StorageFoundationChunkStore>} */
+  const stores = new Map();
 
   beforeEach(async function () {
     await Promise.each(getAll(), deleteFile);
@@ -31,10 +31,12 @@ describe('storage', function () {
   });
 
   afterEach(async function () {
-    const size = await Promise.reduce(stores, (prev, store) => prev + store.length, 0);
+    const size = await Promise.reduce(stores.values(), (prev, store) => prev + store.length, 0);
     expect(size).to.be.greaterThan(0);
     expect(StorageFoundationChunkStore.size).to.equal(size);
-    await destroyStores(stores);
+    await destroyStores(stores, async (infoHash) => {
+      expect(StorageFoundationChunkStore.getStore(infoHash)).to.be.an('undefined');
+    });
     expect(StorageFoundationChunkStore.size).to.equal(0);
     expect(await getRemainingCapacity()).to.equal(0);
   });
@@ -107,5 +109,11 @@ describe('storage', function () {
     await store3.put(1, Buffer.from('0123456789'));
     expect(StorageFoundationChunkStore.size).to.equal(50);
     expect(await getRemainingCapacity()).to.equal(0);
+  });
+
+  it('static getter returns instances', async function () {
+    const infoHash = 'hash';
+    const store = await newstore(stores, 5, 10, { infoHash });
+    expect(StorageFoundationChunkStore.getStore(infoHash)).to.equal(store);
   });
 });

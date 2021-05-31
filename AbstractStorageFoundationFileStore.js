@@ -84,10 +84,15 @@ export default class AbstractStorageFoundationFileStore {
   /** @param {Array<FileOption>} files */
   async #alloc(files) {
     return atomic.add(async () => {
-      size += this.length;
-      await requestCapacity(this.length);
-      await Promise.resolve(files)
-        .map(({ path, length }) => this.queue(path, (file) => file.setLength(length)));
+      try {
+        size += this.length;
+        await requestCapacity(this.length);
+        await Promise.resolve(files)
+          .map(({ path, length }) => this.queue(path, (file) => file.setLength(length)));
+      } catch (err) {
+        this.#closed = true;
+        throw err;
+      }
     });
   }
 

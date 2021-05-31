@@ -10,8 +10,8 @@ chai.use(asPromised);
 const { expect } = chai;
 
 describe('torrent store', function () {
-  /** @type {Set.<StorageFoundationChunkStore} */
-  const stores = new Set();
+  /** @type {Map.<string, StorageFoundationChunkStore} */
+  const stores = new Map();
 
   afterEach(async function () {
     await destroyStores(stores);
