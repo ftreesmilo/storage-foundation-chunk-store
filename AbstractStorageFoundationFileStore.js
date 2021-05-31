@@ -141,6 +141,9 @@ export default class AbstractStorageFoundationFileStore {
    * @returns {Promise.<void>}
    */
   async queue(path, fn) {
+    // Consider not opening and closing resources with each operation...
+    // We can read and write to the file at the same time.
+    // see https://github.com/ftreesmilo/storage-foundation-tests/blob/493fa7890f4f7ac7130ef5e3be091ccb0f02c064/test/api-tests.js#L92
     return this.#queues.get(path)
       .add(() => Promise.using(open(this.#pathMapper(path)), fn));
   }
