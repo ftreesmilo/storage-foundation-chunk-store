@@ -16,7 +16,7 @@ const io = new PQueue({ concurrency: 5 }); // total concurrent io ops across all
 const atomic = new PQueue({ concurrency: 1 });
 let size = 0;
 
-export default class AbstractFileChunkStore {
+export default class AbstractStorageFoundationFileStore {
   /** @type {number} */
   static get size() { return size; }
 

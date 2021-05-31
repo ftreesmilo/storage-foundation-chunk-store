@@ -3,9 +3,9 @@ import Promise from 'bluebird';
 
 import './types.js';
 import ChunkInfo from './ChunkInfo.js';
-import AbstractFileChunkStore from './AbstractFileChunkStore.js';
+import AbstractStorageFoundationFileStore from './AbstractStorageFoundationFileStore.js';
 
-export default class StorageFoundationChunkStore extends AbstractFileChunkStore {
+export default class StorageFoundationChunkStore extends AbstractStorageFoundationFileStore {
   /** @type {number} */
   chunkLength;
 
