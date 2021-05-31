@@ -35,8 +35,8 @@ export default class StorageFoundationChunkStore extends AbstractFileChunkStore 
     super(files, length, (path) => `${infoHash}_${this.#fileidxs.get(path)}`);
 
     this.chunkLength = chunkLength;
-    this.#lastChunkLength = (this.length % this.chunkLength) || this.chunkLength;
-    this.#lastChunkIndex = Math.ceil(this.length / this.chunkLength) - 1;
+    this.#lastChunkLength = (this.length % chunkLength) || chunkLength;
+    this.#lastChunkIndex = Math.ceil(this.length / chunkLength) - 1;
 
     [...files]
       .sort((a, b) => a.path.localeCompare(b.path))
